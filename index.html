@@ -26,13 +26,25 @@ main{max-width:1420px;margin:auto;padding:0 22px 55px}.tabs{display:flex;overflo
 .profile-link{color:inherit;text-decoration:none}.profile-link:hover{color:#245e93;text-decoration:underline;text-underline-offset:2px}.profile-links{display:flex;gap:15px;flex-wrap:wrap;padding:0 16px 16px}.profile-links a{color:#245e93}
 .profile-note{font-size:12px;color:#657687;padding:5px 16px 16px}.card .table-wrap{max-width:100%}
 .profile-position-filters{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:18px 0 9px}.profile-position-filters strong{font-size:12px;color:#526476;margin-right:6px}.profile-position-filters button{border:1px solid #cbd4db;border-radius:3px;background:#fff;color:#435367;font:inherit;padding:7px 12px;cursor:pointer}.profile-position-filters button.active{background:#233b52;border-color:#233b52;color:#fff}
+.standings-table .manager-column{position:sticky;left:0;box-shadow:1px 0 #cbd2d8}
+.standings-table th.manager-column{z-index:3}
+.standings-table td.manager-column{z-index:1;background:#fff}
+.standings-table tr:nth-child(even) td.manager-column{background:#f8fafb}
+.standings-table tr:hover td.manager-column{background:#f2f4f7}
+.box-filters{justify-content:center;margin:0;padding:12px 16px 0}
+.box-filters label{display:flex;align-items:center;gap:6px}
+@media(max-width:720px){
+    .standings-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+    .standings-metrics .metric{min-width:0;padding:10px}
+    .standings-metrics .metric:last-child{grid-column:1/-1}
+}
 </style>
 </head>
 <body>
 <header><div class="eyebrow">2026 Season</div><h1 id="title">Fantasy League Almanac</h1><p id="subtitle"></p></header>
 <main>
 <nav class="tabs" id="tabs"></nav>
-<div class="filters"><input id="search" type="search" placeholder="Search players or managers"><select id="manager"></select><select id="week"></select><button id="clear" type="button">Clear filters</button></div>
+<div class="filters" id="filters"><input id="search" type="search" placeholder="Search players or managers"><select id="manager"></select><select id="week"></select><button id="clear" type="button">Clear filters</button></div>
 <div id="position-filters" class="position-filters"><span>Position:</span></div>
 <div id="stat-toggles" class="stat-toggles"></div>
 <div class="legend"><span class="swatch gold"></span> Best / Great &nbsp;&nbsp; <span class="swatch red"></span> Worst / Bad &nbsp;&nbsp; Click headings to sort</div>
@@ -154,7 +166,8 @@ function show_value(row,c){
     return escape_html(v==null||v===''?'—':v);
 }
 function sorted_rows(rows,columns){if(!state.sort)return rows;const c=columns.find(c=>c.key===state.sort);if(!c)return rows;return [...rows].sort((a,b)=>{let x=a[c.key],y=b[c.key];if(x==null)return 1;if(y==null)return -1;const value=number(x)&&number(y)?x-y:String(x).localeCompare(String(y),undefined,{numeric:true});return state.descending?-value:value;});}
-function draw_table(title,rows,columns,subtitle='',highlight=false){
+function draw_table(title,rows,columns,subtitle='',highlight=false,seasonStandings=false){
+    const activeSort=state.sort||(seasonStandings?'points':null);
     const extrema={};
     if(highlight){for(const c of columns){
         if(state.page==='league'&&!['points','avg_points','best_start','pass_yds','rush_yds','rec_yds','scrimmage_yards','total_td','dst_sacks','fg_made'].includes(c.key))continue;
@@ -178,16 +191,17 @@ function draw_table(title,rows,columns,subtitle='',highlight=false){
         const is_first=i>0&&((current_group&&!previous_groups.includes(current_group))||
             (state.page==='standings'&&standings_breaks.has(c.key)));
         c.group_break=!!is_first;
-        return `<th class="${is_first?'key-group':''}" data-col="${escape_html(c.key)}">${escape_html(c.label)}${state.sort===c.key?(state.descending?' ↓':' ↑'):''}</th>`;
+        const direction=state.descending?'descending':'ascending';
+        return `<th class="${is_first?'key-group':''} ${seasonStandings&&c.key==='manager'?'manager-column':''}" data-col="${escape_html(c.key)}"${activeSort===c.key?` aria-sort="${direction}"`:''}>${escape_html(c.label)}${activeSort===c.key?(state.descending?' ↓':' ↑'):''}</th>`;
     }).join('');
     const cells=sorted_rows(rows,columns).map(r=>'<tr>'+columns.map(c=>{
         const v=r[c.key],m=extrema[`${c.key}:${state.page==='weekly'?r.week:'all'}`];let css=m&&number(v)?v===m.best?'best':v===m.worst&&state.page!=='league'?'worst':'':'';
         if(state.page==='weekly'&&c.key==='result')css=v==='W'?'best':v==='L'?'worst':'';
         if(c.key==='avg_points'&&number(v)&&v<10&&['QB','RB','WR','TE'].includes(r.position))css='bad-value';
         if(c.key==='points_per_game'&&number(v)&&v<10&&['QB','RB','WR','TE'].includes(r.position))css='bad-value';
-        return `<td class="${css} ${c.group_break?'key-group':''}">${show_value(r,c)}</td>`;
+        return `<td class="${css} ${c.group_break?'key-group':''} ${seasonStandings&&c.key==='manager'?'manager-column':''}">${show_value(r,c)}</td>`;
     }).join('')+'</tr>').join('');
-    return `<section class="card"><h2>${escape_html(title)} <span class="muted">(${rows.length})</span></h2>${subtitle?`<div class="sub">${escape_html(subtitle)}</div>`:''}<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${cells||`<tr><td colspan="${columns.length}" class="empty">No matching records</td></tr>`}</tbody></table></div></section>`;
+    return `<section class="card"><h2>${escape_html(title)} <span class="muted">(${rows.length})</span></h2>${subtitle?`<div class="sub">${escape_html(subtitle)}</div>`:''}<div class="table-wrap"><table${seasonStandings?' class="standings-table"':''}><thead><tr>${headers}</tr></thead><tbody>${cells||`<tr><td colspan="${columns.length}" class="empty">No matching records</td></tr>`}</tbody></table></div></section>`;
 }
 const metric=(title,value)=>`<div class="metric"><span>${escape_html(title)}</span><b>${escape_html(value)}</b></div>`;
 function passer_rating(r){const att=r.pass_att||0;if(!att)return null;const values=[((r.pass_cmp||0)/att-.3)*5,((r.pass_yds||0)/att-3)*.25,(r.pass_td||0)/att*20,2.375-(r.interceptions||0)/att*25];return values.reduce((sum,v)=>sum+Math.max(0,Math.min(2.375,v)),0)/6*100;}
@@ -212,7 +226,7 @@ function build_boxscore(){
     const own=all.find(r=>r.team_id===state.selected_team)||all[0];
     if(!own)return '<section class="card"><h2>No box scores</h2></section>';
     const foe=all.find(r=>r.team_id===own.opponent_team_id);
-    let controls=`<section class="card"><div class="box-summary"><label>Week <select id="box-week">${weeks.map(w=>`<option value="${w}" ${w===state.selected_week?'selected':''}>${w}</option>`).join('')}</select></label> &nbsp; <label>Team <select id="box-team">${all.map(r=>`<option value="${r.team_id}" ${r.team_id===own.team_id?'selected':''}>${escape_html(r.manager)}</option>`).join('')}</select></label></div>`;
+    let controls=`<section class="card"><div class="filters box-filters"><label>Week <select id="box-week">${weeks.map(w=>`<option value="${w}" ${w===state.selected_week?'selected':''}>${w}</option>`).join('')}</select></label><label>Team <select id="box-team">${all.map(r=>`<option value="${r.team_id}" ${r.team_id===own.team_id?'selected':''}>${escape_html(r.manager)}</option>`).join('')}</select></label></div>`;
     controls+=`<div class="box-summary"><b>${team_link(own,escape_html(own.manager))} ${fmt(own.points,2)} — ${fmt(own.against,2)} ${team_link({manager:own.opponent},escape_html(own.opponent))}</b>${own.benched_loss?`<div class="note">Could have won with a different eligible lineup · Optimal ${fmt(own.optimal_final_points,2)}</div>`:''}</div>`;
     const box_cols=cols(['slot','Slot'],['player','Player','player'],['position','Pos'],['points','Pts','pts']);
     const slot_order={0:0,2:1,4:3,6:5,23:6,16:8,17:9};
@@ -353,13 +367,19 @@ function nfl_team_profile(){
 }
 function render_profile(){return state.page==='player_profile'?player_profile():state.page==='team_profile'?fantasy_team_profile():nfl_team_profile();}
 function render(){
+    $('filters').style.display=state.page==='boxscores'?'none':'';
     let html='';
     const stats=stat_columns;
     if(['player_profile','team_profile','nfl_profile'].includes(state.page)){html+=render_profile();}
     else if(state.page==='standings'){
         const rows=filter(report.overall);const top=report.overall[0];const best=[...report.players].filter(p=>p.started&&number(p.points)).sort((a,b)=>b.points-a.points)[0];
-        html+=`<div class="metrics">${metric('Managers',report.overall.length)}${metric('Weeks',report.through_week)}${metric('Points leader',top?.manager||'—')}${metric('Best player start',best?`${best.player} · ${fmt(best.points,2)}`:'—')}</div>`;
-        html+=draw_table('Season standings',rows,cols(['rank','#','int'],['manager','Manager','manager'],['wins','W','int'],['losses','L','int','low'],['ties','T','int'],['first_place_weeks','1st','int'],['last_place_weeks','Last','int','low'],['avg_finish','Avg Finish','two','low'],['points','Points','pts'],['against','Against','pts','low'],['avg','Pts/Game','pts'],['best','Best Week','pts'],['worst','Worst Week','pts'],['benched_losses','Benched Losses','int','low'],['points_left','Pts Left','pts','low'],...stats(true).map(c=>[c.key,c.label,c.format,c.dir])),'Sorted by fantasy points scored. Individual statistical totals count starters only.',true);
+        html+=`<div class="metrics standings-metrics">${metric('Managers',report.overall.length)}${metric('Points leader',top?.manager||'—')}${metric('Best player start',best?`${best.player} · ${fmt(best.points,2)}`:'—')}</div>`;
+        html+=draw_table('Season standings',rows,cols(['rank','#','int'],['manager','Manager','manager'],['wins','W','int'],['losses','L','int','low'],['ties','T','int'],['first_place_weeks','1st','int'],['last_place_weeks','Last','int','low'],['avg_finish','Avg Finish','two','low'],['points','Points','pts'],['against','Against','pts','low'],['avg','Pts/Game','pts'],['best','Best Week','pts'],['worst','Worst Week','pts'],['benched_losses','Benched Losses','int','low'],['points_left','Pts Left','pts','low'],...stats(true).map(c=>[c.key,c.label,c.format,c.dir])),'Sorted by fantasy points scored. Individual statistical totals count starters only.',true,true);
+        const winless=rows.filter(r=>r.wins===0&&r.losses>0);
+        if(winless.length){
+            const summaries=winless.map(r=>`${team_link(r,escape_html(r.manager))} went 0–${r.losses} head-to-head and ${r.all_play_wins}–${r.all_play_losses}${r.all_play_ties?`–${r.all_play_ties}`:''} all-play, with ${r.benched_losses} benched ${r.benched_losses===1?'loss':'losses'}.`);
+            html+=`<p class="note">${summaries.join(' ')}</p>`;
+        }
         html+=draw_table('All-play standings',filter([...report.overall].sort((a,b)=>b.all_play_wins-a.all_play_wins)),cols(['manager','Manager','manager'],['all_play_wins','All-play W','int'],['all_play_losses','All-play L','int','low'],['all_play_ties','All-play T','int'],['wins','Actual W','int'],['losses','Actual L','int','low'],['points','Points','pts']),'Aggregate W/L when compared against all other teams each week, rather than only the scheduled opponent. The highest scorer in a 10-team league goes 9–0; the lowest goes 0–9.',true);
     }else if(state.page==='weekly'){
         const rows=filter(report.weeks,true).sort((a,b)=>a.week-b.week||b.points-a.points);
@@ -390,7 +410,7 @@ function render(){
     $('content').querySelectorAll('[data-nfl-pos]').forEach(button=>button.addEventListener('click',()=>{state.nfl_position=button.dataset.nflPos;state.sort=null;render();}));
     $('content').querySelectorAll('[data-profile-kind]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();open_profile(a.dataset.profileKind,a.dataset.profileId);}));
     $('content').querySelectorAll('[data-profile-back]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();select_page(state.back_page);history.replaceState(null,'','#'+state.back_page);}));
-    $('content').querySelectorAll('th[data-col]').forEach(th=>th.addEventListener('click',()=>{const key=th.dataset.col;state.descending=state.sort===key?!state.descending:true;state.sort=key;render();}));
+    $('content').querySelectorAll('th[data-col]').forEach(th=>th.addEventListener('click',()=>{const key=th.dataset.col;const activeSort=state.sort||(th.closest('.standings-table')?'points':null);state.descending=activeSort===key?!state.descending:true;state.sort=key;render();}));
     $('content').querySelectorAll('[data-box-week]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();open_boxscore(a.dataset.boxWeek,a.dataset.boxTeam);}));
     if($('box-week'))$('box-week').addEventListener('change',e=>{state.selected_week=Number(e.target.value);render();});
     if($('box-team'))$('box-team').addEventListener('change',e=>{state.selected_team=Number(e.target.value);render();});
