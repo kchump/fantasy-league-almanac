@@ -38,6 +38,13 @@ main{max-width:1420px;margin:auto;padding:0 22px 55px}.tabs{display:flex;overflo
     .standings-metrics .metric{min-width:0;padding:10px}
     .standings-metrics .metric:last-child{grid-column:1/-1}
 }
+.mobile-tabs{display:none}
+.week-recap .sub{display:flex;flex-wrap:wrap;gap:8px 20px}
+.box-return{display:block;margin:12px 16px 0;padding:0;border:0;background:none;font:inherit}
+@media(max-width:720px){
+    .tabs .extra-tab{display:none}
+    .tabs .tab{padding-inline:6px}.tabs .mobile-tabs{display:block;min-width:65px;width:108px;max-width:100%;align-self:center;margin-left:auto;font:inherit;color:#405065;border:1px solid #ccd2d7;border-radius:4px;background:#fff;padding:6px}
+}
 </style>
 </head>
 <body>
@@ -158,7 +165,8 @@ function show_value(row,c){
     if(c.key==='opponent'&&v)return team_link({manager:v},escape_html(v));
     if(c.key==='top_player'&&row.top_player_id!=null)return player_link({player_id:row.top_player_id},escape_html(v));
     if(c.format==='flag')return v?'<span class="flag">BENCHED LOSS</span>':'—';
-    if(c.format==='link')return `<a href="#boxscores" class="clickable" data-box-week="${row.week}" data-box-team="${row.team_id}">Week ${row.week} box score</a>`;
+    if(c.key==='points'&&c.format==='score')return box_link(row,fmt(v,2));
+    if(c.format==='link')return box_link(row,`Week ${row.week} box score`);
     if(c.format==='int')return fmt(v);
     if(c.format==='one')return fmt(v,1);
     if(c.format==='two'||c.format==='pts')return fmt(v,2);
@@ -174,7 +182,7 @@ function draw_table(title,rows,columns,subtitle='',highlight=false,seasonStandin
         if(state.page==='players'&&!['points'].includes(c.key))continue;
         if(state.page==='leaders'&&!['points','avg_points','best_start'].includes(c.key))continue;
         if(state.page==='weekly'&&!['points','against','top_player_points','optimal_final_points','points_left'].includes(c.key))continue;
-        if(!['int','one','two','pts'].includes(c.format)||['rank','week','round','pick','round_pick','roster_weeks','starts','games','weeks','ties','all_play_ties','bid','bench_points'].includes(c.key))continue;
+        if(!['int','one','two','pts','score'].includes(c.format)||['rank','week','round','pick','round_pick','roster_weeks','starts','games','weeks','ties','all_play_ties','bid','bench_points'].includes(c.key))continue;
         const week_groups=state.page==='weekly'?[...new Set(rows.map(r=>r.week))]:[null];
         for(const week of week_groups){
             const values=rows.filter(r=>week===null||r.week===week).map(r=>r[c.key]).filter(number);
@@ -219,14 +227,38 @@ function player_leaders(){
     }).sort((a,b)=>b.points-a.points);
 }
 function player_cols(){return cols(['player','Player','player'],['manager','Manager','managers'],['position','Pos'],['pro_team_id','NFL Team','nfl'],['points','Points','pts'],['avg_points','Pts/Game','pts'],['games','Games','int'],['best_start','Best Week','pts'],...stat_columns(true).map(c=>[c.key,c.label,c.format,c.dir]));}
-function open_boxscore(week,team_id){state.selected_week=Number(week);state.selected_team=Number(team_id);state.page='boxscores';state.sort=null;draw_tabs();draw_position_filters();draw_stat_toggles();render();window.location.hash='boxscores';}
+let box_return=null;
+function box_link(row,text){
+    const label=`Week ${row.week} box score for ${row.manager}`;
+    return `<a href="#boxscores/${row.week}/${row.team_id}" aria-label="${escape_html(label)}" class="clickable" data-box-week="${row.week}" data-box-team="${row.team_id}">${text}</a>`;
+}
+function open_boxscore(week,team_id){
+    box_return={page:state.page,sort:state.sort,descending:state.descending,position:state.position,groups:state.groups,scrollY:window.scrollY};
+    state.selected_week=Number(week);
+    state.selected_team=Number(team_id);
+    select_page('boxscores');
+    window.scrollTo(0,0);
+}
+function weekly_recap(rows){
+    const scored=rows.filter(r=>number(r.points));
+    if(!scored.length)return '';
+    const week=Math.max(...scored.map(r=>r.week));
+    const games=scored.filter(r=>r.week===week);
+    const high=games.reduce((best,r)=>r.points>best.points?r:best);
+    const closest=games.filter(r=>number(r.against)).sort((a,b)=>Math.abs(a.points-a.against)-Math.abs(b.points-b.against))[0];
+    const swing=games.filter(r=>r.benched_loss&&number(r.against)).sort((a,b)=>(b.against-b.points)-(a.against-a.points))[0];
+    const items=[`<b>High score</b> ${box_link(high,`${escape_html(high.manager)} ${fmt(high.points,2)}`)}`];
+    if(closest)items.push(`<b>Closest game</b> ${box_link(closest,`${escape_html(closest.manager)} vs. ${escape_html(closest.opponent)} (${fmt(Math.abs(closest.points-closest.against),2)} pts)`)}`);
+    if(swing)items.push(`<b>Biggest flippable loss</b> ${box_link(swing,`${escape_html(swing.manager)} (${fmt(swing.against-swing.points,2)} pts)`)}`);
+    return `<section class="card week-recap"><h2>Week ${week} recap</h2><div class="sub">${items.map(item=>`<span>${item}</span>`).join('')}</div></section>`;
+}
 function build_boxscore(){
     const weeks=[...new Set(report.weeks.map(r=>r.week))].sort((a,b)=>a-b);
     const all=report.weeks.filter(r=>r.week===state.selected_week);
     const own=all.find(r=>r.team_id===state.selected_team)||all[0];
     if(!own)return '<section class="card"><h2>No box scores</h2></section>';
     const foe=all.find(r=>r.team_id===own.opponent_team_id);
-    let controls=`<section class="card"><div class="filters box-filters"><label>Week <select id="box-week">${weeks.map(w=>`<option value="${w}" ${w===state.selected_week?'selected':''}>${w}</option>`).join('')}</select></label><label>Team <select id="box-team">${all.map(r=>`<option value="${r.team_id}" ${r.team_id===own.team_id?'selected':''}>${escape_html(r.manager)}</option>`).join('')}</select></label></div>`;
+    let controls=`<section class="card">${box_return?'<button type="button" id="box-return" class="box-return clickable">Back to previous view</button>':''}<div class="filters box-filters"><label>Week <select id="box-week">${weeks.map(w=>`<option value="${w}" ${w===state.selected_week?'selected':''}>${w}</option>`).join('')}</select></label><label>Team <select id="box-team">${all.map(r=>`<option value="${r.team_id}" ${r.team_id===own.team_id?'selected':''}>${escape_html(r.manager)}</option>`).join('')}</select></label></div>`;
     controls+=`<div class="box-summary"><b>${team_link(own,escape_html(own.manager))} ${fmt(own.points,2)} — ${fmt(own.against,2)} ${team_link({manager:own.opponent},escape_html(own.opponent))}</b>${own.benched_loss?`<div class="note">Could have won with a different eligible lineup · Optimal ${fmt(own.optimal_final_points,2)}</div>`:''}</div>`;
     const box_cols=cols(['slot','Slot'],['player','Player','player'],['position','Pos'],['points','Pts','pts']);
     const slot_order={0:0,2:1,4:3,6:5,23:6,16:8,17:9};
@@ -380,10 +412,11 @@ function render(){
             const summaries=winless.map(r=>`${team_link(r,escape_html(r.manager))} went 0–${r.losses} head-to-head and ${r.all_play_wins}–${r.all_play_losses}${r.all_play_ties?`–${r.all_play_ties}`:''} all-play, with ${r.benched_losses} benched ${r.benched_losses===1?'loss':'losses'}.`);
             html+=`<p class="note">${summaries.join(' ')}</p>`;
         }
-        html+=draw_table('All-play standings',filter([...report.overall].sort((a,b)=>b.all_play_wins-a.all_play_wins)),cols(['manager','Manager','manager'],['all_play_wins','All-play W','int'],['all_play_losses','All-play L','int','low'],['all_play_ties','All-play T','int'],['wins','Actual W','int'],['losses','Actual L','int','low'],['points','Points','pts']),'Aggregate W/L when compared against all other teams each week, rather than only the scheduled opponent. The highest scorer in a 10-team league goes 9–0; the lowest goes 0–9.',true);
+        html+=draw_table('All-play standings',filter(report.overall).map(r=>({...r,expected_wins:report.overall.length>1?(r.all_play_wins+r.all_play_ties/2)/(report.overall.length-1):null})).sort((a,b)=>b.all_play_wins-a.all_play_wins),cols(['manager','Manager','manager'],['all_play_wins','All-play W','int'],['all_play_losses','All-play L','int','low'],['all_play_ties','All-play T','int'],['expected_wins','Expected W','one'],['wins','Actual W','int'],['losses','Actual L','int','low'],['points','Points','pts']),'Aggregate W/L when compared against all other teams each week, rather than only the scheduled opponent. Expected wins divide all-play wins plus half of ties by the number of possible opponents.',true);
     }else if(state.page==='weekly'){
         const rows=filter(report.weeks,true).sort((a,b)=>a.week-b.week||b.points-a.points);
-        html+=draw_table('Weekly results',rows,cols(['week','Week','int'],['manager','Manager','manager'],['opponent','Opponent'],['result','W/L'],['points','Points','pts'],['against','Against','pts','low'],['top_player','Top Starter','player'],['top_player_points','Top Pts','pts'],['bench_points','Bench Pts','pts'],['optimal_final_points','Optimal','pts'],['points_left','Pts Left','pts','low'],['benched_loss','Benched Loss','flag'],['box_link','Box Score','link'],...stats(false).map(c=>[c.key,c.label,c.format,c.dir])),'Gold/red scores mark the highest/lowest totals in each week; results highlight wins and losses.',true);
+        html+=weekly_recap(rows);
+        html+=draw_table('Weekly results',rows,cols(['week','Week','int'],['manager','Manager','manager'],['opponent','Opponent'],['result','W/L'],['points','Points','score'],['against','Against','pts','low'],['top_player','Top Starter','player'],['top_player_points','Top Pts','pts'],['bench_points','Bench Pts','pts'],['optimal_final_points','Optimal','pts'],['points_left','Pts Left','pts','low'],['benched_loss','Benched Loss','flag'],['box_link','Box Score','link'],...stats(false).map(c=>[c.key,c.label,c.format,c.dir])),'Gold/red scores mark the highest/lowest totals in each week; results highlight wins and losses.',true);
         html+=draw_table('Benched their way to a loss',rows.filter(r=>r.benched_loss),cols(['week','Week','int'],['manager','Manager','manager'],['opponent','Opponent'],['points','Actual','pts'],['against','Opponent','pts'],['optimal_final_points','Optimal','pts'],['points_left','Pts Left','pts'],['bench_fix','Better Plays'],['box_link','Lineups','link']),'Select a box score to see the starting lineup, bench, and possible replacements.',true);
     }else if(state.page==='boxscores')html+=build_boxscore();
     else if(state.page==='players')html+=draw_table('Weekly player box scores',filter(report.players,true).sort((a,b)=>(b.points??-Infinity)-(a.points??-Infinity)),cols(['week','Week','int'],['manager','Manager','manager'],['player','Player','player'],['position','Pos'],['pro_team_id','NFL Team','nfl'],['slot','Slot'],['started','Started','boolean'],['points','Fantasy Pts','pts'],...stats(false).map(c=>[c.key,c.label,c.format,c.dir])),'',true);
@@ -411,12 +444,30 @@ function render(){
     $('content').querySelectorAll('[data-profile-kind]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();open_profile(a.dataset.profileKind,a.dataset.profileId);}));
     $('content').querySelectorAll('[data-profile-back]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();select_page(state.back_page);history.replaceState(null,'','#'+state.back_page);}));
     $('content').querySelectorAll('th[data-col]').forEach(th=>th.addEventListener('click',()=>{const key=th.dataset.col;const activeSort=state.sort||(th.closest('.standings-table')?'points':null);state.descending=activeSort===key?!state.descending:true;state.sort=key;render();}));
-    $('content').querySelectorAll('[data-box-week]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();open_boxscore(a.dataset.boxWeek,a.dataset.boxTeam);}));
+    $('content').querySelectorAll('[data-box-week]').forEach(a=>a.addEventListener('click',e=>{if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;e.preventDefault();open_boxscore(a.dataset.boxWeek,a.dataset.boxTeam);}));
+    $('box-return')?.addEventListener('click',()=>{
+        const previous=box_return;
+        box_return=null;
+        const {scrollY,...view}=previous;
+        Object.assign(state,view);
+        draw_tabs();draw_position_filters();draw_stat_toggles();render();
+        window.scrollTo(0,scrollY);
+    });
     if($('box-week'))$('box-week').addEventListener('change',e=>{state.selected_week=Number(e.target.value);render();});
     if($('box-team'))$('box-team').addEventListener('change',e=>{state.selected_team=Number(e.target.value);render();});
 }
 function select_page(page){state.page=page;state.position='All';state.sort=null;state.descending=true;state.groups=default_groups();draw_tabs();draw_position_filters();draw_stat_toggles();render();}
-function draw_tabs(){$('tabs').innerHTML=pages.map(([key,label])=>`<button class="tab ${(state.page===key||(['player_profile','team_profile','nfl_profile'].includes(state.page)&&state.back_page===key))?'active':''}" data-page="${key}">${label}</button>`).join('');$('tabs').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>select_page(b.dataset.page)));}
+function draw_tabs(){
+    const active=state.page.endsWith('_profile')?state.back_page:state.page;
+    const primary=new Set(['standings','weekly','boxscores']);
+    const extras=pages.filter(([key])=>!primary.has(key));
+    $('tabs').innerHTML=pages.map(([key,label])=>`<button class="tab ${active===key?'active':''} ${primary.has(key)?'':'extra-tab'}" data-page="${key}"${active===key?' aria-current="page"':''}>${label}</button>`).join('')+
+        `<select class="mobile-tabs" id="more-tabs" aria-label="More sections"><option value="">More</option>${extras.map(([key,label])=>`<option value="${key}"${active===key?' selected':''}>${label}</option>`).join('')}</select>`;
+    $('tabs').querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{box_return=null;select_page(button.dataset.page);}));
+    $('more-tabs').addEventListener('change',event=>{
+        if(event.target.value){box_return=null;select_page(event.target.value);}
+    });
+}
 $('title').textContent=`${report.league_name||'Fantasy League'} — Season Almanac`;
 $('subtitle').textContent=`Through Week ${report.through_week} · ${report.season}`;
 $('manager').innerHTML=['All managers',...new Set(report.teams.map(t=>t.manager))].map(x=>`<option>${escape_html(x)}</option>`).join('');
@@ -429,7 +480,13 @@ state.groups=default_groups();state.selected_week=report.through_week;state.sele
 draw_tabs();draw_position_filters();draw_stat_toggles();render();
 const initial_hash=decodeURIComponent(window.location.hash.slice(1));
 const profile_match=initial_hash.match(/^(player|team|nfl)\/(.+)$/);
+const box_match=initial_hash.match(/^boxscores\/(\d+)\/(\d+)$/);
 if(profile_match)open_profile(profile_match[1],profile_match[2]);
+else if(box_match&&report.weeks.some(row=>row.week===Number(box_match[1])&&row.team_id===Number(box_match[2]))){
+    state.selected_week=Number(box_match[1]);
+    state.selected_team=Number(box_match[2]);
+    select_page('boxscores');
+}else if(initial_hash==='boxscores')select_page('boxscores');
 </script>
 </body>
 </html>
